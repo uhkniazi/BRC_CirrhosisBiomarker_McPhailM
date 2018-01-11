@@ -216,8 +216,8 @@ s = sapply(n, function(x) {
   (abs(mCor[,x]) >= 0.7)
 })
 colSums(s)
-#cvKeep = c('X1091.89_623.234', 'Neutrophil', 'MELD', 'X1106.76_466.66', 'X1091.88_607.132', 'X939.59_348.571')
 cvKeep = names(colSums(s)[colSums(s) <= 3])
+#cvKeep = c('SOFA', 'MELD', 'Albumin', 'BMI', 'Neutrophil')
 n = n[!(n%in% cvKeep)]
 i = which(colnames(dfData) %in% n)
 cn = colnames(dfData)[-i]
