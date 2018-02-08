@@ -74,8 +74,8 @@ dfData.bk = dfData
 mDat.bk = mDat
 
 ## choose a subset of the data for modelling
-dfData = dfData[,cvSample]
-mDat = mDat[cvSample,]
+dfData = dfData[,cvSample[1]]
+mDat = mDat[cvSample[1],]
 identical(rownames(dfData), colnames(mDat))
 identical(colnames(dfData), rownames(mDat))
 dfData = data.frame(t(mDat), fGroups)
@@ -150,35 +150,48 @@ summary(fit.lme1)
 library(rstan)
 rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
-stanDso = rstan::stan_model(file='tResponse1RandomEffect.stan')
+stanDso = rstan::stan_model(file='normFiniteMixture1RandomEffect.stan')
 
 ## calculate hyperparameters for variance of coefficients
-l = gammaShRaFromModeSD(sd(dfData$values), 2*sd(dfData$values))
+l = gammaShRaFromModeSD(sd(dfData$X1000.44_415.827), 2*sd(dfData$X1000.44_415.827))
 
 ## set initial values
-ran = ranef(fit.lme1)
-r1 = ran$Coef
-
-initf = function(chain_id = 1) {
-  list(sigmaRan1 = 2, sigmaPop=1, rGroupsJitter1=r1)
-}
+# ran = ranef(fit.lme1)
+# r1 = ran$Coef
+# 
+# initf = function(chain_id = 1) {
+#   list(sigmaRan1 = 2, rGroupsJitter1=r1)
+# }
 
 ### try a t model without mixture
-lStanData = list(Ntotal=nrow(dfData), Nclusters1=nlevels(dfData$Coef),
-                 NgroupMap1=as.numeric(dfData$Coef),
-                 y=dfData$values, nu=4,
-                 gammaShape=l$shape, gammaRate=l$rate,
-                 intercept = mean(dfData$values), intercept_sd= sd(dfData$values)*3)
+lStanData = list(Ntotal=nrow(dfData), Nclusters1=nlevels(dfData$fGroups),
+                 NgroupMap1=as.numeric(dfData$fGroups),
+                 y=dfData$X760.369_26.816, iMixtures=2,
+                 gammaShape=l$shape, gammaRate=l$rate, iIntercepts=tapply(dfData$X760.369_26.816, dfData$fGroups, mean))
 
 fit.stan = sampling(stanDso, data=lStanData, iter=500, chains=2,
-                    pars=c('betas', 'sigmaRan1', 
-                           'sigmaPop', 
-                           'rGroupsJitter1'),
+                    pars=c('sigmaRan1', 'sigma',
+                           'rGroupsJitter1', 'mu', 'iMixWeights', 'muFitted'),
                     cores=2, init=initf, control=list(adapt_delta=0.99, max_treedepth = 12))
-save(fit.stan, file='temp/fit.stan.tdis.rds')
+save(fit.stan, file='temp/fit.stan.normMix.rds')
 
-print(fit.stan, c('betas', 'sigmaRan1', 'sigmaPop'), digits=3)
+print(fit.stan, c('sigmaRan1', 'sigma', 'mu', 'iMixWeights'), digits=3)
 print(fit.stan, 'rGroupsJitter1')
+
+## check if labelling degeneracy has occured
+## see here: http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html
+params1 = as.data.frame(extract(fit.stan, permuted=FALSE)[,1,])
+params2 = as.data.frame(extract(fit.stan, permuted=FALSE)[,2,])
+
+## check if the means from different chains overlap
+## Labeling Degeneracy by Enforcing an Ordering
+par(mfrow=c(1,2))
+plot(params1$`mu[1]`, params1$`mu[2]`, pch=20, col=2)
+plot(params2$`mu[1]`, params2$`mu[2]`, pch=20, col=3)
+
+par(mfrow=c(1,1))
+plot(params1$`mu[1]`, params1$`mu[2]`, pch=20, col=2)
+points(params2$`mu[1]`, params2$`mu[2]`, pch=20, col=3)
 
 ## get the coefficient of interest - Modules in our case from the random coefficients section
 mCoef = extract(fit.stan)$rGroupsJitter1
