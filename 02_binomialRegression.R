@@ -60,11 +60,25 @@ identical(rownames(dfData), colnames(mDat))
 gc(reset = T)
 fGroups = factor(dfData$X90.day)
 
+dim(mDat)
+sf = rowMeans(mDat)
+mDat.res = sweep(mDat, 1, sf, '-')
+## use median as size factor
+sf = apply(mDat.res, 2, function(x) quantile(x, prob=0.5))
+mDat = sweep(mDat, 2, sf, '-')
+
 dfData = data.frame(t(mDat), fGroups)
 
 # save backup
 dfData.bk = dfData
 mDat.bk = mDat
+
+## choose a subset of the data for modelling
+dfData = dfData[,cvSample]
+mDat = mDat[cvSample,]
+identical(rownames(dfData), colnames(mDat))
+identical(colnames(dfData), rownames(mDat))
+dfData = data.frame(t(mDat), fGroups)
 
 ### DE model using limma
 library(limma)
@@ -133,6 +147,9 @@ library(lme4)
 fit.lme1 = lmer(values ~ 1 + (1 | Coef), data=dfData, REML=F)
 summary(fit.lme1)
 
+library(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
 stanDso = rstan::stan_model(file='tResponse1RandomEffect.stan')
 
 ## calculate hyperparameters for variance of coefficients
@@ -216,7 +233,7 @@ dfLimmma.2$SYMBOL = as.character(rownames(dfLimmma.2))
 dfResults$SYMBOL = as.character(rownames(dfResults))
 
 ## produce the plots 
-f_plotVolcano(dfLimmma.2, 'limma', fc.lim = c(-2, 2), p.adj.cut = 1e-4)
+f_plotVolcano(dfLimmma.2, 'limma', fc.lim = c(-2, 2))
 f_plotVolcano(dfResults, 'Stan', fc.lim=c(-2.5, 2.5))
 
 m = tapply(dfData$values, dfData$ind, mean)
