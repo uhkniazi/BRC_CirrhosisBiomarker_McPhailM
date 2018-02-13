@@ -152,6 +152,29 @@ rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
 stanDso = rstan::stan_model(file='normFiniteMixture1RandomEffect.stan')
 
+lObs = vector(mode = 'list', length = length(cvSample))
+
+for (i in seq_along(cvSample)){
+  ## calculate hyperparameters for variance of coefficients
+  l = gammaShRaFromModeSD(sd(dfData[,cvSample[i]]), 2*sd(dfData[,cvSample[i]]))
+  
+  ### try a t model without mixture
+  lStanData = list(Ntotal=nrow(dfData), Nclusters1=nlevels(dfData$fGroups),
+                   NgroupMap1=as.numeric(dfData$fGroups),
+                   y=dfData[,cvSample[i]], iMixtures=2,
+                   gammaShape=l$shape, gammaRate=l$rate, iIntercepts=tapply(dfData[,cvSample[i]], dfData$fGroups, mean))
+  
+  fit.stan = sampling(stanDso, data=lStanData, iter=500, chains=2,
+                      pars=c('sigmaRan1', 'sigma',
+                             'rGroupsJitter1', 'mu', 'iMixWeights'),
+                      cores=2, control=list(adapt_delta=0.99, max_treedepth = 12))
+  lObs[[i]] = fit.stan
+  rm(fit.stan)
+  gc(reset = T)
+}
+
+save(lObs, file='temp/lObs.rds')
+
 ## calculate hyperparameters for variance of coefficients
 l = gammaShRaFromModeSD(sd(dfData$X1000.44_415.827), 2*sd(dfData$X1000.44_415.827))
 
@@ -171,8 +194,8 @@ lStanData = list(Ntotal=nrow(dfData), Nclusters1=nlevels(dfData$fGroups),
 
 fit.stan = sampling(stanDso, data=lStanData, iter=500, chains=2,
                     pars=c('sigmaRan1', 'sigma',
-                           'rGroupsJitter1', 'mu', 'iMixWeights', 'muFitted'),
-                    cores=2, init=initf, control=list(adapt_delta=0.99, max_treedepth = 12))
+                           'rGroupsJitter1', 'mu', 'iMixWeights'),
+                    cores=2, control=list(adapt_delta=0.99, max_treedepth = 12))
 save(fit.stan, file='temp/fit.stan.normMix.rds')
 
 print(fit.stan, c('sigmaRan1', 'sigma', 'mu', 'iMixWeights'), digits=3)
