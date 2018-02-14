@@ -1,0 +1,372 @@
+# Name: 02_variableSelectionLNEG.R
+# Auth: umar.niazi@kcl.ac.uk
+# Date: 13/02/2018
+# Desc: variable selection using the mass spec data
+
+source('header.R')
+
+if(!require(downloader) || !require(methods)) stop('Library downloader and methods required')
+
+url = 'https://raw.githubusercontent.com/uhkniazi/CCrossValidation/experimental/CCrossValidation.R'
+download(url, 'CCrossValidation.R')
+
+# load the required packages
+source('CCrossValidation.R')
+# delete the file after source
+unlink('CCrossValidation.R')
+
+dfData = read.csv(file.choose(), header = T, na.strings = c('na', 'NA', 'NaN'))
+dfData = t(dfData)
+dfData = data.frame(dfData)
+cn = t(dfData[1,])
+colnames(dfData) = cn[,1]
+dfData = dfData[-1,]
+rm(cn)
+
+## remove the unwanted groups 
+i = which(dfData$`Class ID` %in% c('ACLF', 'AD', 'SC'))
+length(i)
+dfData = dfData[i,]
+dim(dfData)
+dfData = droplevels.data.frame(dfData)
+
+gc(reset = T)
+
+write.csv(dfData, 'temp/transposed_cleaned.csv', row.names = F)
+## clears data types etc, do a fresh reload
+dfData = read.csv('temp/transposed_cleaned.csv', header = T, na.strings = c('na', 'NA', 'NaN'))
+gc(reset = T)
+## main grouping factor
+fGroups = factor(dfData$X90.day)
+levels(fGroups)
+
+colnames(dfData)[1:100]
+## first 94 columns are not mass spec data
+## drop those first to work only on massspec data
+dfData = dfData[,-c(1:94)]
+gc(reset = T)
+dim(dfData)
+dfData = na.omit(dfData)
+dim(dfData)
+
+## log transform the data
+mDat = log(dfData+1)
+mDat = t(mDat)
+
+#### calculate a scaling factor for normalization
+## this outlier detection is based on previous analysis
+m = colMeans(mDat)
+plot(m)
+## 3 samples are different or outliers drop those
+k = hclust(dist(m))
+plot(k)
+c = cutree(k, k = 2)
+table(c)
+iOutliers = which(c == 2)
+
+## drop the outliers
+mDat = mDat[,-iOutliers]
+sf = rowMeans(mDat)
+mDat.res = sweep(mDat, 1, sf, '-')
+## use median as size factor
+sf = apply(mDat.res, 2, function(x) quantile(x, prob=0.5))
+mDat.norm = sweep(mDat, 2, sf, '-')
+
+## this comparison of normalised and raw data was done previously so ignore this time
+
+## perform analysis with normalised
+mDat = mDat.norm
+dim(mDat)
+rm(mDat.res); rm(mDat.norm)
+
+## reload the full data
+dfData = read.csv('temp/transposed_cleaned.csv', header = T, na.strings = c('na', 'NA', 'NaN'))
+dfData = dfData[-iOutliers,-c(1,3)]
+dim(dfData)
+## add the new normalised/raw data
+colnames(dfData)[1:100]
+dfData = dfData[,1:91]
+dim(mDat)
+dim(dfData)
+identical(rownames(dfData), colnames(mDat))
+dfData = cbind(dfData, t(mDat))
+dim(dfData)
+
+gc(reset = T)
+
+fGroups = factor(dfData$X90.day)
+## control variable
+fControl = factor(dfData$Class.ID)
+dfData = dfData[,-(which(colnames(dfData) %in% c('Class.ID', 'X90.day', 'X30.day', 'X1.Year', "Sample.File.Name")))]
+
+# save backup
+dfData.bk = dfData
+fGroups.bk = fGroups
+fControl.bk = fControl
+## perform variable selection only on the mass spec data using random forest approach 
+colnames(dfData)[1:100]
+dfData = dfData[,-(1:87)]
+dim(dfData)
+
+
+## create a test and training set
+set.seed(1234);
+test = sample(1:nrow(dfData), size = nrow(dfData)*0.2, replace = F)
+table(fGroups[test])
+table(fGroups[-test])
+
+table(fControl[test])
+table(fControl[-test])
+
+
+## select a subset of genes 
+## this ideally should use a finite mixture model
+### DE model using limma
+library(limma)
+
+design = model.matrix(~ fGroups[test] + fControl[test])
+head(design)
+
+mData = as.matrix(dfData[test,])
+
+fit = lmFit(t(mData), design)
+fit = eBayes(fit)
+
+dfLimmma.2 = topTable(fit, coef = 2, adjust='BH', number=Inf)
+hist(dfLimmma.2$logFC)
+hist(dfLimmma.2$adj.P.Val)
+dfLimmma.2 = dfLimmma.2[order(dfLimmma.2$P.Value, decreasing = F),]
+head(dfLimmma.2)
+
+########## repeat this analysis in stan using t distribution hierarchical model
+## format the data frame for input
+dfData.org = dfData
+dfData = stack(dfData[test, ])
+dfData$fBatch = fGroups[test]
+dfData$fAdjust = fControl[test]
+dfData$Coef = factor(dfData$fBatch:dfData$ind)
+dfData$Coef.adj = factor(dfData$fAdjust:dfData$ind)
+dfData = droplevels.data.frame(dfData)
+dfData = dfData[order(dfData$Coef, dfData$Coef.adj), ]
+
+# #### fit mixed effect model
+library(lme4)
+fit.lme1 = lmer(values ~ 1 + (1 | Coef) + (1 | Coef.adj), data=dfData, REML=F)
+summary(fit.lme1)
+
+plot(fitted(fit.lme1), resid(fit.lme1), pch=20, cex=0.7)
+lines(lowess(fitted(fit.lme1), resid(fit.lme1)), col=2)
+
+## fit model with stan
+library(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+################# t model
+stanDso = rstan::stan_model(file='tResponse2RandomEffectNoFixed.stan')
+
+## calculate hyperparameters for variance of coefficients
+l = gammaShRaFromModeSD(sd(dfData$values), 2*sd(dfData$values))
+
+## set initial values
+# initf = function(chain_id = 1) {
+#   gm = tapply(dfData$values, dfData$Coef, mean) - mean(dfData$values)
+#   list(betas = mean(dfData$values), sigmaRan1 = sd(gm), sigmaPop=sd(dfData$values), nu=4, rGroupsJitter1=gm)
+# }
+## set initial values
+ran = ranef(fit.lme1)
+r1 = ran$Coef
+r2 = ran$Coef.adj
+initf = function(chain_id = 1) {
+  list(sigmaRan1 = 2, sigmaRan2=2, sigmaPop=1, rGroupsJitter1=r1, rGroupsJitter2=r2, nu=4)
+}
+
+### try a t model without mixture
+lStanData = list(Ntotal=nrow(dfData), Nclusters1=nlevels(dfData$Coef),
+                 Nclusters2=nlevels(dfData$Coef.adj),
+                 NgroupMap1=as.numeric(dfData$Coef),
+                 NgroupMap2=as.numeric(dfData$Coef.adj),
+                 Ncol=1, 
+                 y=dfData$values, 
+                 gammaShape=l$shape, gammaRate=l$rate,
+                 intercept = mean(dfData$values), intercept_sd= sd(dfData$values)*3)
+
+fit.stan = sampling(stanDso, data=lStanData, iter=300, chains=4,
+                    pars=c('betas', 'sigmaRan1', 'sigmaRan2',
+                           'nu', 'sigmaPop', #'mu',
+                           'rGroupsJitter1', 'rGroupsJitter2'),
+                    cores=4, init=initf, control=list(adapt_delta=0.99, max_treedepth = 12))
+save(fit.stan, file='temp/fit.stan.tdis_2.rds')
+print(fit.stan, c('betas', 'sigmaRan1', 'sigmaRan2', 'sigmaPop', 'nu'), digits=3)
+
+### get the coefficient for main treatment 
+## get the coefficient of interest - Modules in our case from the random coefficients section
+mCoef = extract(fit.stan)$rGroupsJitter1
+dim(mCoef)
+# ## get the intercept at population level
+iIntercept = as.numeric(extract(fit.stan)$betas)
+## add the intercept to each random effect variable, to get the full coefficient
+mCoef = sweep(mCoef, 1, iIntercept, '+')
+
+## function to calculate statistics for differences between coefficients
+getDifference = function(ivData, ivBaseline){
+  stopifnot(length(ivData) == length(ivBaseline))
+  # get the difference vector
+  d = ivData - ivBaseline
+  # get the z value
+  z = mean(d)/sd(d)
+  # get 2 sided p-value
+  p = pnorm(-abs(mean(d)/sd(d)))*2
+  return(list(z=z, p=p))
+}
+
+## split the data into the comparisons required
+d = data.frame(cols=1:ncol(mCoef), mods=levels(dfData$Coef))
+## split this factor into sub factors
+f = strsplit(as.character(d$mods), ':')
+d = cbind(d, do.call(rbind, f))
+head(d)
+colnames(d) = c(colnames(d)[1:2], c('fBatch', 'ind'))
+d$split = factor(d$ind)
+
+## get a p-value for each comparison
+l = tapply(d$cols, d$split, FUN = function(x, base='0', deflection='1') {
+  c = x
+  names(c) = as.character(d$fBatch[c])
+  dif = getDifference(ivData = mCoef[,c[deflection]], ivBaseline = mCoef[,c[base]])
+  r = data.frame(ind= as.character(d$ind[c[base]]), coef.base=mean(mCoef[,c[base]]), 
+                 coef.deflection=mean(mCoef[,c[deflection]]), zscore=dif$z, pvalue=dif$p)
+  r$difference = r$coef.deflection - r$coef.base
+  #return(format(r, digi=3))
+  return(r)
+})
+
+dfResults = do.call(rbind, l)
+dfResults$adj.P.Val = p.adjust(dfResults$pvalue, method='BH')
+
+### compare the results from the 2 models
+dfResults$logFC = dfResults$difference
+dfResults$P.Value = dfResults$pvalue
+dfLimmma.2$SYMBOL = as.character(rownames(dfLimmma.2))
+dfResults$SYMBOL = as.character(rownames(dfResults))
+
+## produce the plots 
+f_plotVolcano(dfLimmma.2, 'limma 1 vs 0', fc.lim = c(-2, 2), p.adj.cut = 1)
+f_plotVolcano(dfResults, 'Stan 1 vs 0', fc.lim=c(-7, 5))
+
+m = tapply(dfData$values, dfData$ind, mean)
+i = match(rownames(dfResults), names(m))
+m = m[i]
+identical(names(m), rownames(dfResults))
+plotMeanFC(m, dfResults, 0.1, 'Stan 1 vs 0')
+
+m = tapply(dfData$values, dfData$ind, mean)
+i = match(rownames(dfLimmma.2), names(m))
+m = m[i]
+m = m[!is.na(m)]
+i = match(names(m), rownames(dfLimmma.2))
+dfLimmma.2 = dfLimmma.2[i,]
+identical(names(m), rownames(dfLimmma.2))
+plotMeanFC(m, dfLimmma.2, 0.1, 'limma 1 vs 0')
+
+
+i = match(rownames(dfResults), rownames(dfLimmma.2))
+dfLimmma.2 = dfLimmma.2[i,]
+i = match(rownames(dfLimmma.2), rownames(dfResults))
+dfResults = dfResults[i,]
+identical(rownames(dfResults), rownames(dfLimmma.2))
+
+plot(dfResults$pvalue, dfLimmma.2$P.Value, pch=20, cex=0.6, col='grey', main='P Values 1 vs 0', xlab='Stan', ylab='Limma')
+abline(lm(dfLimmma.2$P.Value ~ dfResults$pvalue), col=2, lwd=2)
+plot(dfResults$logFC, dfLimmma.2$logFC, pch=20, cex=0.8, col='grey', main='Log FC 1 vs 0', xlab='Stan', ylab='Limma')
+abline(lm(dfLimmma.2$logFC ~ dfResults$logFC), col=2, lwd=1)
+df = cbind(stan=dfResults$pvalue, limma=dfLimmma.2$P.Value)
+
+write.csv(dfResults, file='temp/stan_t.csv', row.names = F)
+write.csv(dfLimmma.2, file='temp/limma.csv', row.names = F)
+
+######### stan section ends
+dfData = dfData.org
+dfResults = dfResults[order(dfResults$pvalue), ]
+## select the top variables at adjusted p-value of 0.1
+cvTopVariables = rownames(dfResults)[dfResults$adj.P.Val < 0.1]
+length(cvTopVariables)
+## perform nested random forest
+## adjust boot.num as desired
+oVar.r = CVariableSelection.RandomForest(dfData[-test, cvTopVariables], fGroups[-test], boot.num = 100, big.warn = F)
+save(oVar.r, file='temp/oVar.rds')
+# plot the top 20 variables based on importance scort with 95% confidence interval for standard error
+par(mfrow=c(1,1))
+plot.var.selection(oVar.r)
+# get the variables
+dfRF = CVariableSelection.RandomForest.getVariables(oVar.r)
+# select the top 30 variables
+cvTopGenes = rownames(dfRF)[1:30]
+
+# use the top 30 features to find top combinations of genes
+dfData = dfData[,colnames(dfData) %in% cvTopGenes]
+
+## look at colinear variables
+m = NULL;
+
+for (i in 1:ncol(dfData)){
+  m = cbind(m, dfData[-test ,i])
+}
+colnames(m) = colnames(dfData)
+mCor = cor(m, use="na.or.complete")
+library(caret)
+### find the columns that are correlated and should be removed
+n = findCorrelation((mCor), cutoff = 0.7, names=T)
+data.frame(n)
+sapply(n, function(x) {
+  (abs(mCor[,x]) >= 0.7)
+})
+s = sapply(n, function(x) {
+  (abs(mCor[,x]) >= 0.7)
+})
+colSums(s)
+cvKeep = names(colSums(s)[colSums(s) <= 4])
+#cvKeep = c('SOFA', 'MELD', 'Albumin', 'BMI', 'Neutrophil')
+n = n[!(n%in% cvKeep)]
+i = which(colnames(dfData) %in% n)
+cn = colnames(dfData)[-i]
+
+dfData.bk2 = dfData
+dfData = dfData[,cn]
+dim(dfData)
+
+oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
+# plot the number of variables vs average error rate
+plot.var.selection(oVar.sub)
+
+# print variable combinations
+for (i in 1:6){
+  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+  cat('Variable Count', i, paste(cvTopGenes.sub), '\n')
+  #print(cvTopGenes.sub)
+}
+
+## 10 fold nested cross validation with various variable combinations
+par(mfrow=c(2,2))
+# try models of various sizes with CV
+for (i in 1:6){
+  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+  dfData.train = data.frame(dfData[-test ,cvTopGenes.sub])
+  colnames(dfData.train) = cvTopGenes.sub
+  
+  dfData.test = data.frame(dfData[test ,cvTopGenes.sub])
+  colnames(dfData.test) = cvTopGenes.sub
+  
+  oCV = CCrossValidation.LDA(test.dat = dfData.test, train.dat = dfData.train, test.groups = fGroups[test],
+                             train.groups = fGroups[-test], level.predict = '0', boot.num = 500)
+  
+  plot.cv.performance(oCV)
+  # print variable names and 95% confidence interval for AUC
+  temp = oCV@oAuc.cv
+  x = as.numeric(temp@y.values)
+  print(paste('Variable Count', i))
+  print(cvTopGenes.sub)
+  print(signif(quantile(x, probs = c(0.025, 0.975)), 2))
+}
+##################################
+
