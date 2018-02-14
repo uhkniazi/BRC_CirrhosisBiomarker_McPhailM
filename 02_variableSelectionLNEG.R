@@ -370,3 +370,159 @@ for (i in 1:6){
 }
 ##################################
 
+############## use a binomial regression approach this time to rank variables
+dfData = dfData.org
+dfData = dfData[,cvTopVariables]
+dfData = scale(dfData)
+dim(dfData)
+dfData = data.frame(dfData, fGroups)
+dfData = dfData[-test, ]
+#dfData$fGroups = fGroups
+
+lData = list(resp=ifelse(dfData$fGroups == '0', 0, 1), mModMatrix=model.matrix(fGroups ~ 1 + ., data=dfData))
+
+library(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+stanDso = rstan::stan_model(file='binomialRegression.stan')
+
+lStanData = list(Ntotal=length(lData$resp), Ncol=ncol(lData$mModMatrix), X=lData$mModMatrix,
+                 y=lData$resp)
+
+## give initial values
+initf = function(chain_id = 1) {
+  list(betas=rep(0, times=ncol(lStanData$X)), tau=0.5)
+}
+
+
+fit.stan = sampling(stanDso, data=lStanData, iter=2000, chains=2, pars=c('tau', 'betas2'), init=initf, 
+                    control=list(adapt_delta=0.99, max_treedepth = 11))
+
+print(fit.stan, c('betas2', 'tau'))
+print(fit.stan, 'tau')
+traceplot(fit.stan, 'tau')
+
+## get the coefficient of interest - Modules in our case from the random coefficients section
+mCoef = extract(fit.stan)$betas2
+dim(mCoef)
+# ## get the intercept at population level
+iIntercept = mCoef[,1]
+mCoef = mCoef[,-1]
+# ## add the intercept to each coefficient, to get the full coefficient
+# mCoef = sweep(mCoef, 1, iIntercept, '+')
+
+## function to calculate statistics for a coefficient
+getDifference = function(ivData){
+  # get the difference vector
+  d = ivData
+  # get the z value
+  z = mean(d)/sd(d)
+  # get 2 sided p-value
+  p = pnorm(-abs(mean(d)/sd(d)))*2
+  return(p)
+}
+
+ivPval = apply(mCoef, 2, getDifference)
+hist(ivPval)
+plot(colMeans(mCoef), ivPval, pch=19)
+i = which(ivPval < 0.7)
+colnames(lData$mModMatrix)[i+1]
+colMeans(mCoef)[i]
+cvTopGenes.binomial = colnames(lData$mModMatrix)[i+1]
+
+## where are these in the random forest table
+which(rownames(dfRF) %in% cvTopGenes.binomial)
+
+################### repeat the selection process again 
+# select the top 30 variables
+cvTopGenes = rownames(dfRF)[1:30]
+cvTopGenes = unique(c(cvTopGenes, cvTopGenes.binomial))
+length(cvTopGenes)
+# use the top 30 features to find top combinations of genes
+dfData = dfData.org
+dfData = dfData[,colnames(dfData) %in% cvTopGenes]
+
+## look at colinear variables
+m = NULL;
+
+for (i in 1:ncol(dfData)){
+  m = cbind(m, dfData[-test ,i])
+}
+colnames(m) = colnames(dfData)
+mCor = cor(m, use="na.or.complete")
+library(caret)
+### find the columns that are correlated and should be removed
+n = findCorrelation((mCor), cutoff = 0.7, names=T)
+data.frame(n)
+sapply(n, function(x) {
+  (abs(mCor[,x]) >= 0.7)
+})
+s = sapply(n, function(x) {
+  (abs(mCor[,x]) >= 0.7)
+})
+colSums(s)
+cvKeep = names(colSums(s)[colSums(s) <= 4])
+n = n[!(n%in% cvKeep)]
+i = which(colnames(dfData) %in% n)
+cn = colnames(dfData)[-i]
+
+dfData.bk2 = dfData
+dfData = dfData[,cn]
+dim(dfData)
+
+oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
+# plot the number of variables vs average error rate
+plot.var.selection(oVar.sub)
+
+# print variable combinations
+for (i in 1:6){
+  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+  cat('Variable Count', i, paste(cvTopGenes.sub), '\n')
+  #print(cvTopGenes.sub)
+}
+
+## 10 fold nested cross validation with various variable combinations
+par(mfrow=c(2,2))
+# try models of various sizes with CV
+for (i in 1:6){
+  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+  dfData.train = data.frame(dfData[-test ,cvTopGenes.sub])
+  colnames(dfData.train) = cvTopGenes.sub
+  
+  dfData.test = data.frame(dfData[test ,cvTopGenes.sub])
+  colnames(dfData.test) = cvTopGenes.sub
+  
+  oCV = CCrossValidation.LDA(test.dat = dfData.test, train.dat = dfData.train, test.groups = fGroups[test],
+                             train.groups = fGroups[-test], level.predict = '0', boot.num = 500)
+  
+  plot.cv.performance(oCV)
+  # print variable names and 95% confidence interval for AUC
+  temp = oCV@oAuc.cv
+  x = as.numeric(temp@y.values)
+  print(paste('Variable Count', i))
+  print(cvTopGenes.sub)
+  print(signif(quantile(x, probs = c(0.025, 0.975)), 2))
+}
+##################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
