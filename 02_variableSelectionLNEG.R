@@ -103,11 +103,10 @@ dfData = dfData[,-(which(colnames(dfData) %in% c('Class.ID', 'X90.day', 'X30.day
 dfData.bk = dfData
 fGroups.bk = fGroups
 fControl.bk = fControl
-## perform variable selection only on the mass spec data using random forest approach 
+## perform variable selection only on the mass spec data
 colnames(dfData)[1:100]
 dfData = dfData[,-(1:87)]
 dim(dfData)
-
 
 ## create a test and training set
 set.seed(1234);
@@ -118,16 +117,13 @@ table(fGroups[-test])
 table(fControl[test])
 table(fControl[-test])
 
-
-## select a subset of genes 
-## this ideally should use a finite mixture model
 ### DE model using limma
 library(limma)
 
-design = model.matrix(~ fGroups[test] + fControl[test])
+design = model.matrix(~ fGroups[-test] + fControl[-test])
 head(design)
 
-mData = as.matrix(dfData[test,])
+mData = as.matrix(dfData[-test,])
 
 fit = lmFit(t(mData), design)
 fit = eBayes(fit)
@@ -141,9 +137,9 @@ head(dfLimmma.2)
 ########## repeat this analysis in stan using t distribution hierarchical model
 ## format the data frame for input
 dfData.org = dfData
-dfData = stack(dfData[test, ])
-dfData$fBatch = fGroups[test]
-dfData$fAdjust = fControl[test]
+dfData = stack(dfData[-test, ])
+dfData$fBatch = fGroups[-test]
+dfData$fAdjust = fControl[-test]
 dfData$Coef = factor(dfData$fBatch:dfData$ind)
 dfData$Coef.adj = factor(dfData$fAdjust:dfData$ind)
 dfData = droplevels.data.frame(dfData)
@@ -154,8 +150,8 @@ library(lme4)
 fit.lme1 = lmer(values ~ 1 + (1 | Coef) + (1 | Coef.adj), data=dfData, REML=F)
 summary(fit.lme1)
 
-plot(fitted(fit.lme1), resid(fit.lme1), pch=20, cex=0.7)
-lines(lowess(fitted(fit.lme1), resid(fit.lme1)), col=2)
+# plot(fitted(fit.lme1), resid(fit.lme1), pch=20, cex=0.7)
+# lines(lowess(fitted(fit.lme1), resid(fit.lme1)), col=2)
 
 ## fit model with stan
 library(rstan)
@@ -191,16 +187,15 @@ lStanData = list(Ntotal=nrow(dfData), Nclusters1=nlevels(dfData$Coef),
                  gammaShape=l$shape, gammaRate=l$rate,
                  intercept = mean(dfData$values), intercept_sd= sd(dfData$values)*3)
 
-fit.stan = sampling(stanDso, data=lStanData, iter=300, chains=4,
+fit.stan = sampling(stanDso, data=lStanData, iter=500, chains=2,
                     pars=c('betas', 'sigmaRan1', 'sigmaRan2',
                            'nu', 'sigmaPop', #'mu',
                            'rGroupsJitter1', 'rGroupsJitter2'),
-                    cores=4, init=initf, control=list(adapt_delta=0.99, max_treedepth = 12))
-save(fit.stan, file='temp/fit.stan.tdis_2.rds')
+                    cores=2, init=initf)#, control=list(adapt_delta=0.99, max_treedepth = 12))
+save(fit.stan, file='temp/fit.stan.tdis_16Feb_500.rds')
 print(fit.stan, c('betas', 'sigmaRan1', 'sigmaRan2', 'sigmaPop', 'nu'), digits=3)
 
 ### get the coefficient for main treatment 
-## get the coefficient of interest - Modules in our case from the random coefficients section
 mCoef = extract(fit.stan)$rGroupsJitter1
 dim(mCoef)
 # ## get the intercept at population level
@@ -252,7 +247,7 @@ dfResults$SYMBOL = as.character(rownames(dfResults))
 
 ## produce the plots 
 f_plotVolcano(dfLimmma.2, 'limma 1 vs 0', fc.lim = c(-2, 2), p.adj.cut = 1)
-f_plotVolcano(dfResults, 'Stan 1 vs 0', fc.lim=c(-7, 5))
+f_plotVolcano(dfResults, 'Stan 1 vs 0', fc.lim=c(-6, 7))
 
 m = tapply(dfData$values, dfData$ind, mean)
 i = match(rownames(dfResults), names(m))
@@ -268,7 +263,6 @@ i = match(names(m), rownames(dfLimmma.2))
 dfLimmma.2 = dfLimmma.2[i,]
 identical(names(m), rownames(dfLimmma.2))
 plotMeanFC(m, dfLimmma.2, 0.1, 'limma 1 vs 0')
-
 
 i = match(rownames(dfResults), rownames(dfLimmma.2))
 dfLimmma.2 = dfLimmma.2[i,]
