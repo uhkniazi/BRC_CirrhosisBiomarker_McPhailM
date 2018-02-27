@@ -192,7 +192,7 @@ fit.stan = sampling(stanDso, data=lStanData, iter=500, chains=2,
                            'nu', 'sigmaPop', #'mu',
                            'rGroupsJitter1', 'rGroupsJitter2'),
                     cores=2, init=initf)#, control=list(adapt_delta=0.99, max_treedepth = 12))
-save(fit.stan, file='temp/fit.stan.tdis_16Feb_500.rds')
+#save(fit.stan, file='temp/fit.stan.tdis_16Feb_500.rds')
 print(fit.stan, c('betas', 'sigmaRan1', 'sigmaRan2', 'sigmaPop', 'nu'), digits=3)
 
 ### get the coefficient for main treatment 
@@ -247,7 +247,7 @@ dfResults$SYMBOL = as.character(rownames(dfResults))
 
 ## produce the plots 
 f_plotVolcano(dfLimmma.2, 'limma 1 vs 0', fc.lim = c(-2, 2), p.adj.cut = 1)
-f_plotVolcano(dfResults, 'Stan 1 vs 0', fc.lim=c(-6, 7))
+f_plotVolcano(dfResults[abs(dfResults$logFC) <= 3, ], 'Stan 1 vs 0', fc.lim=c(-3, 3))
 
 m = tapply(dfData$values, dfData$ind, mean)
 i = match(rownames(dfResults), names(m))
@@ -282,6 +282,7 @@ write.csv(dfLimmma.2, file='temp/limma.csv', row.names = F)
 ######### stan section ends
 dfData = dfData.org
 dfResults = dfResults[order(dfResults$pvalue), ]
+table(dfResults$adj.P.Val < 0.1)
 ## select the top variables at adjusted p-value of 0.1
 cvTopVariables = rownames(dfResults)[dfResults$adj.P.Val < 0.1]
 length(cvTopVariables)
@@ -300,34 +301,34 @@ cvTopGenes = rownames(dfRF)[1:30]
 # use the top 30 features to find top combinations of genes
 dfData = dfData[,colnames(dfData) %in% cvTopGenes]
 
-## look at colinear variables
-m = NULL;
-
-for (i in 1:ncol(dfData)){
-  m = cbind(m, dfData[-test ,i])
-}
-colnames(m) = colnames(dfData)
-mCor = cor(m, use="na.or.complete")
-library(caret)
-### find the columns that are correlated and should be removed
-n = findCorrelation((mCor), cutoff = 0.7, names=T)
-data.frame(n)
-sapply(n, function(x) {
-  (abs(mCor[,x]) >= 0.7)
-})
-s = sapply(n, function(x) {
-  (abs(mCor[,x]) >= 0.7)
-})
-colSums(s)
-cvKeep = names(colSums(s)[colSums(s) <= 4])
-#cvKeep = c('SOFA', 'MELD', 'Albumin', 'BMI', 'Neutrophil')
-n = n[!(n%in% cvKeep)]
-i = which(colnames(dfData) %in% n)
-cn = colnames(dfData)[-i]
-
-dfData.bk2 = dfData
-dfData = dfData[,cn]
-dim(dfData)
+# ## look at colinear variables
+# m = NULL;
+# 
+# for (i in 1:ncol(dfData)){
+#   m = cbind(m, dfData[-test ,i])
+# }
+# colnames(m) = colnames(dfData)
+# mCor = cor(m, use="na.or.complete")
+# library(caret)
+# ### find the columns that are correlated and should be removed
+# n = findCorrelation((mCor), cutoff = 0.7, names=T)
+# data.frame(n)
+# sapply(n, function(x) {
+#   (abs(mCor[,x]) >= 0.7)
+# })
+# s = sapply(n, function(x) {
+#   (abs(mCor[,x]) >= 0.7)
+# })
+# colSums(s)
+# cvKeep = names(colSums(s)[colSums(s) <= 4])
+# #cvKeep = c('SOFA', 'MELD', 'Albumin', 'BMI', 'Neutrophil')
+# n = n[!(n%in% cvKeep)]
+# i = which(colnames(dfData) %in% n)
+# cn = colnames(dfData)[-i]
+# 
+# dfData.bk2 = dfData
+# dfData = dfData[,cn]
+# dim(dfData)
 
 oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
 # plot the number of variables vs average error rate
@@ -419,50 +420,64 @@ getDifference = function(ivData){
 ivPval = apply(mCoef, 2, getDifference)
 hist(ivPval)
 plot(colMeans(mCoef), ivPval, pch=19)
-i = which(ivPval < 0.7)
-colnames(lData$mModMatrix)[i+1]
-colMeans(mCoef)[i]
-cvTopGenes.binomial = colnames(lData$mModMatrix)[i+1]
+m = colMeans(mCoef)
+names(m) = colnames(lData$mModMatrix)[2:length(m)]
+m = abs(m)
+m = sort(m, decreasing = T)
+#i = which(ivPval < 0.85)
+# colnames(lData$mModMatrix)[i+1]
+# colMeans(mCoef)[i]
+#cvTopGenes.binomial = colnames(lData$mModMatrix)[i+1]
+cvTopGenes.binomial = names(m[m > 0.25])
 
 ## where are these in the random forest table
 which(rownames(dfRF) %in% cvTopGenes.binomial)
 
+cvTopGenes.first = NULL;
+for (i in 1:10){
+  cvTopGenes.first = append(cvTopGenes.first, CVariableSelection.ReduceModel.getMinModel(oVar.sub, i))
+}
+cvTopGenes.first = unique(cvTopGenes.first)
+length(cvTopGenes.first)
 ################### repeat the selection process again 
 # select the top 30 variables
-cvTopGenes = rownames(dfRF)[1:30]
-cvTopGenes = unique(c(cvTopGenes, cvTopGenes.binomial))
+#cvTopGenes = rownames(dfRF)[1:30]
+cvTopGenes = unique(c(cvTopGenes.first, cvTopGenes.binomial))
+#cvTopGenes = cvTopGenes.binomial
 length(cvTopGenes)
+cvTopGenes = cvTopGenes[1:30]
 # use the top 30 features to find top combinations of genes
 dfData = dfData.org
 dfData = dfData[,colnames(dfData) %in% cvTopGenes]
-
-## look at colinear variables
-m = NULL;
-
-for (i in 1:ncol(dfData)){
-  m = cbind(m, dfData[-test ,i])
-}
-colnames(m) = colnames(dfData)
-mCor = cor(m, use="na.or.complete")
-library(caret)
-### find the columns that are correlated and should be removed
-n = findCorrelation((mCor), cutoff = 0.7, names=T)
-data.frame(n)
-sapply(n, function(x) {
-  (abs(mCor[,x]) >= 0.7)
-})
-s = sapply(n, function(x) {
-  (abs(mCor[,x]) >= 0.7)
-})
-colSums(s)
-cvKeep = names(colSums(s)[colSums(s) <= 4])
-n = n[!(n%in% cvKeep)]
-i = which(colnames(dfData) %in% n)
-cn = colnames(dfData)[-i]
-
-dfData.bk2 = dfData
-dfData = dfData[,cn]
 dim(dfData)
+# ## look at colinear variables
+# m = NULL;
+# 
+# for (i in 1:ncol(dfData)){
+#   m = cbind(m, dfData[-test ,i])
+# }
+# colnames(m) = colnames(dfData)
+# mCor = cor(m, use="na.or.complete")
+# library(caret)
+# ### find the columns that are correlated and should be removed
+# n = findCorrelation((mCor), cutoff = 0.7, names=T)
+# data.frame(n)
+# sapply(n, function(x) {
+#   (abs(mCor[,x]) >= 0.7)
+# })
+# s = sapply(n, function(x) {
+#   (abs(mCor[,x]) >= 0.7)
+# })
+# colSums(s)
+# cvKeep = names(colSums(s)[colSums(s) <= 4])
+# n = n[!(n%in% cvKeep)]
+# i = which(colnames(dfData) %in% n)
+# cn = colnames(dfData)[-i]
+# 
+# dfData.bk2 = dfData
+# dfData = dfData[,cn]
+# dim(dfData)
+oVar.sub.first = oVar.sub
 
 oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
 # plot the number of variables vs average error rate
