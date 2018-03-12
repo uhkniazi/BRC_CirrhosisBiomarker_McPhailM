@@ -673,7 +673,7 @@ X = as.matrix(cbind(rep(1, times=nrow(dfData.new)), dfData.new[,colnames(mCoef)[
 colnames(X) = colnames(mCoef)
 ivPredict = mypred(colMeans(mCoef), list(mModMatrix=X))
 fPredict = rep('0', times=length(ivPredict))
-fPredict[ivPredict > 0.5] = '1'
+fPredict[ivPredict > 0.64556962] = '1'
 table(fPredict, fGroups)
 
 ## fit a binomial model
@@ -683,9 +683,37 @@ ivPredict.bin = predict(fit.bin, type = 'response')
 
 m = data.frame(round(ivPredict, 2), round(ivPredict.bin, 2), fGroups)
 
+## find the optimal point
+ivTruth = fGroups == '1'
+
+p = prediction(ivPredict, ivTruth)
+perf.alive = performance(p, 'tpr', 'fpr')
+dfPerf.alive = data.frame(c=perf.alive@alpha.values, t=perf.alive@y.values[[1]], f=perf.alive@x.values[[1]], 
+                          r=perf.alive@y.values[[1]]/perf.alive@x.values[[1]])
+colnames(dfPerf.alive) = c('c', 't', 'f', 'r')
 
 
+ivTruth = !ivTruth
+p = prediction(1-ivPredict, ivTruth)
+perf.death = performance(p, 'tpr', 'fpr')
+dfPerf.death = data.frame(c=perf.death@alpha.values, t=perf.death@y.values[[1]], f=perf.death@x.values[[1]], 
+                          r=perf.death@y.values[[1]]/perf.death@x.values[[1]])
+colnames(dfPerf.death) = c('c', 't', 'f', 'r')
 
+plot(perf.alive)
+plot(perf.death, add=T, col='red')
+
+dfPlot = data.frame(fGroups, ivPredict)
+
+xyplot(ifelse(fGroups == '1', 1, 0) ~ ivPredict, type=c('p'), ylab='Survived')
+
+plot(ivPredict, ifelse(fGroups == '1', 1, 0), type=c('p'), ylab='Class Prediction', pch=20)
+#lines(lowess(dfPlot$ivPredict[dfPlot$tpr > 0.9], ifelse(dfPlot$fGroups[dfPlot$tpr > 0.9] == '1', 1, 0)))
+lines(lowess(dfPlot$ivPredict, ifelse(dfPlot$fGroups == '1', 1, 0)))
+
+points(ivPredict, ifelse(fGroups == '0', 1, 0), type=c('p'), col='red', pch=20)
+lines(lowess(ivPredict, ifelse(fGroups == '0', 1, 0)), col='red')
+plot(1-ivPredict, ifelse(fGroups == '0', 1, 0))
 
 # # ## get the intercept at population level
 # iIntercept = mCoef[,1]
