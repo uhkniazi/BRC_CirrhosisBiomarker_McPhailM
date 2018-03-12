@@ -329,23 +329,23 @@ write.csv(dfLimmma.2, file='temp/limma_lpos.csv', row.names = F)
 dfData = dfData.org
 dfResults = dfResults[order(dfResults$pvalue), ]
 table(dfResults$adj.P.Val < 0.1)
-## select the top variables at adjusted p-value of 0.1
+## select the top variables 1 to 2000 ranked by pvalue
 cvTopVariables = rownames(dfResults)[1:2000]#[dfResults$adj.P.Val < 0.1]
 length(cvTopVariables)
 ## perform nested random forest
 ## adjust boot.num as desired
-oVar.r = CVariableSelection.RandomForest(dfData[-test, cvTopVariables], fGroups[-test], boot.num = 100, big.warn = F)
-save(oVar.r, file='temp/oVar_lpos.rds')
-# plot the top 20 variables based on importance scort with 95% confidence interval for standard error
-par(mfrow=c(1,1))
-plot.var.selection(oVar.r)
-# get the variables
-dfRF = CVariableSelection.RandomForest.getVariables(oVar.r)
-# select the top 30 variables
-cvTopGenes = rownames(dfRF)[1:30]
+# oVar.r = CVariableSelection.RandomForest(dfData[-test, cvTopVariables], fGroups[-test], boot.num = 100, big.warn = F)
+# save(oVar.r, file='temp/oVar_lpos.rds')
+# # plot the top 20 variables based on importance scort with 95% confidence interval for standard error
+# par(mfrow=c(1,1))
+# plot.var.selection(oVar.r)
+# # get the variables
+# dfRF = CVariableSelection.RandomForest.getVariables(oVar.r)
+# # select the top 30 variables
+# cvTopGenes = rownames(dfRF)[1:30]
 
 # use the top 30 features to find top combinations of genes
-dfData = dfData[,colnames(dfData) %in% cvTopGenes]
+# dfData = dfData[,colnames(dfData) %in% cvTopGenes]
 
 # ## look at colinear variables
 # m = NULL;
@@ -376,39 +376,39 @@ dfData = dfData[,colnames(dfData) %in% cvTopGenes]
 # dfData = dfData[,cn]
 # dim(dfData)
 
-oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
-# plot the number of variables vs average error rate
-plot.var.selection(oVar.sub)
-
-# print variable combinations
-for (i in 1:6){
-  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
-  cat('Variable Count', i, paste(cvTopGenes.sub), '\n')
-  #print(cvTopGenes.sub)
-}
-
-## 10 fold nested cross validation with various variable combinations
-par(mfrow=c(2,2))
-# try models of various sizes with CV
-for (i in 1:6){
-  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
-  dfData.train = data.frame(dfData[-test ,cvTopGenes.sub])
-  colnames(dfData.train) = cvTopGenes.sub
-  
-  dfData.test = data.frame(dfData[test ,cvTopGenes.sub])
-  colnames(dfData.test) = cvTopGenes.sub
-  
-  oCV = CCrossValidation.LDA(test.dat = dfData.test, train.dat = dfData.train, test.groups = fGroups[test],
-                             train.groups = fGroups[-test], level.predict = '0', boot.num = 500)
-  
-  plot.cv.performance(oCV)
-  # print variable names and 95% confidence interval for AUC
-  temp = oCV@oAuc.cv
-  x = as.numeric(temp@y.values)
-  print(paste('Variable Count', i))
-  print(cvTopGenes.sub)
-  print(signif(quantile(x, probs = c(0.025, 0.975)), 2))
-}
+# oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
+# # plot the number of variables vs average error rate
+# plot.var.selection(oVar.sub)
+# 
+# # print variable combinations
+# for (i in 1:6){
+#   cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+#   cat('Variable Count', i, paste(cvTopGenes.sub), '\n')
+#   #print(cvTopGenes.sub)
+# }
+# 
+# ## 10 fold nested cross validation with various variable combinations
+# par(mfrow=c(2,2))
+# # try models of various sizes with CV
+# for (i in 1:6){
+#   cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+#   dfData.train = data.frame(dfData[-test ,cvTopGenes.sub])
+#   colnames(dfData.train) = cvTopGenes.sub
+#   
+#   dfData.test = data.frame(dfData[test ,cvTopGenes.sub])
+#   colnames(dfData.test) = cvTopGenes.sub
+#   
+#   oCV = CCrossValidation.LDA(test.dat = dfData.test, train.dat = dfData.train, test.groups = fGroups[test],
+#                              train.groups = fGroups[-test], level.predict = '0', boot.num = 500)
+#   
+#   plot.cv.performance(oCV)
+#   # print variable names and 95% confidence interval for AUC
+#   temp = oCV@oAuc.cv
+#   x = as.numeric(temp@y.values)
+#   print(paste('Variable Count', i))
+#   print(cvTopGenes.sub)
+#   print(signif(quantile(x, probs = c(0.025, 0.975)), 2))
+# }
 ##################################
 
 ############## use a binomial regression approach this time to rank variables
@@ -476,15 +476,15 @@ m = sort(m, decreasing = T)
 #cvTopGenes.binomial = colnames(lData$mModMatrix)[i+1]
 cvTopGenes.binomial = names(m)[1:30] #names(m[m > 0.25])
 
-## where are these in the random forest table
-which(rownames(dfRF) %in% cvTopGenes.binomial)
-
-cvTopGenes.first = NULL;
-for (i in 1:5){
-  cvTopGenes.first = append(cvTopGenes.first, CVariableSelection.ReduceModel.getMinModel(oVar.sub, i))
-}
-cvTopGenes.first = unique(cvTopGenes.first)
-length(cvTopGenes.first)
+# ## where are these in the random forest table
+# which(rownames(dfRF) %in% cvTopGenes.binomial)
+# 
+# cvTopGenes.first = NULL;
+# for (i in 1:5){
+#   cvTopGenes.first = append(cvTopGenes.first, CVariableSelection.ReduceModel.getMinModel(oVar.sub, i))
+# }
+# cvTopGenes.first = unique(cvTopGenes.first)
+# length(cvTopGenes.first)
 ################### repeat the selection process again 
 # select the top 30 variables
 #cvTopGenes = rownames(dfRF)[1:30]
@@ -558,9 +558,159 @@ for (i in 1:8){
   print(cvTopGenes.sub)
   print(signif(quantile(x, probs = c(0.025, 0.975)), 2))
 }
+
+### plot these genes of interest
+dfData = dfData[,colnames(dfData) %in% CVariableSelection.ReduceModel.getMinModel(oVar.sub, 7)]
+dim(dfData)
+
+dfData = stack(dfData)
+dfData$fBatch = fGroups
+dfData$fAdjust = fControl
+dfData$Coef = factor(dfData$fBatch:dfData$ind)
+dfData$Coef.adj = factor(dfData$fAdjust:dfData$ind)
+dfData = droplevels.data.frame(dfData)
+str(dfData)
+
+library(lattice)
+densityplot(~ values | ind, groups=fBatch, data=dfData, auto.key = list(columns=2), pch=20, cex=0.5)
+bwplot(values ~ fBatch | ind, data=dfData, type='b', panel=panel.violin, varwidth=F, xlab='Survival Status', ylab='Expression Value')
+xyplot(values ~ fBatch | ind, data=dfData, type='p', varwidth=F)
+
 ##################################
+# library(LearnBayes)
+logit.inv = function(p) {exp(p)/(exp(p)+1) }
+
+## binomial prediction
+mypred = function(theta, data){
+  betas = theta # vector of betas i.e. regression coefficients for population
+  ## data
+  mModMatrix = data$mModMatrix
+  # calculate fitted value
+  iFitted = mModMatrix %*% betas
+  # using logit link so use inverse logit
+  iFitted = logit.inv(iFitted)
+  return(iFitted)
+}
+# ## lets write a custom glm using a bayesian approach
+# ## write the log posterior function
+# mylogpost = function(theta, data){
+#   ## parameters to track/estimate
+#   betas = theta # vector of betas i.e. regression coefficients for population
+#   ## data
+#   resp = data$resp # resp
+#   mModMatrix = data$mModMatrix
+#   
+#   # calculate fitted value
+#   iFitted = mModMatrix %*% betas
+#   # using logit link so use inverse logit
+#   iFitted = logit.inv(iFitted)
+#   # write the priors and likelihood 
+#   lp = dnorm(betas[1], 0, 10, log=T) + sum(dnorm(betas[-1], 0, 10, log=T))
+#   lik = sum(dbinom(resp, 1, iFitted, log=T))
+#   val = lik + lp
+#   return(val)
+# }
+
+dfData = dfData.org
+dfData = dfData[,colnames(dfData) %in% CVariableSelection.ReduceModel.getMinModel(oVar.sub, 7)]
+dim(dfData)
+#dfData = scale(dfData)
+dim(dfData)
+dfData = data.frame(dfData, fGroups)
+
+# lData = list(resp=ifelse(dfData$fGroups == '0', 0, 1), mModMatrix=model.matrix(fGroups ~ 1 + ., data=dfData))
+# start = c(rep(0, times=ncol(lData$mModMatrix)))
+# mylogpost(start, lData)
+# 
+# fit.2 = laplace(mylogpost, start, lData)
+# fit.2
+# data.frame(coef(fit.1), fit.2$mode)
+# se = sqrt(diag(fit.2$var))
 
 
+### lets take a sample from this 
+## parameters for the multivariate t density
+# tpar = list(m=fit.2$mode, var=fit.2$var*2, df=4)
+# ## get a sample directly and using sir (sampling importance resampling with a t proposal density)
+# s = sir(mylogpost, tpar, 5000, lData)
+# colnames(s) = colnames(lData$mModMatrix)
+# apply(s, 2, mean)
+# apply(s, 2, sd)
+# pairs(s, pch=20)
+# fit.2$sir = s
+
+lData = list(resp=ifelse(dfData$fGroups == '0', 0, 1), mModMatrix=model.matrix(fGroups ~ 1 + ., data=dfData))
+
+stanDso = rstan::stan_model(file='binomialRegression.stan')
+
+lStanData = list(Ntotal=length(lData$resp), Ncol=ncol(lData$mModMatrix), X=lData$mModMatrix,
+                 y=lData$resp)
+
+## give initial values
+initf = function(chain_id = 1) {
+  list(betas=rep(0, times=ncol(lStanData$X)), tau=0.5)
+}
+
+
+fit.stan = sampling(stanDso, data=lStanData, iter=2000, chains=2, pars=c('tau', 'betas2'), init=initf, 
+                    control=list(adapt_delta=0.99, max_treedepth = 11))
+
+print(fit.stan, c('betas2', 'tau'))
+print(fit.stan, 'tau')
+traceplot(fit.stan, 'tau')
+
+## get the coefficient of interest - Modules in our case from the random coefficients section
+mCoef = extract(fit.stan)$betas2
+dim(mCoef)
+colnames(mCoef) = c('Intercept', CVariableSelection.ReduceModel.getMinModel(oVar.sub, 7))
+pairs(mCoef, pch=20)
+
+## get the predicted values
+dfData.new = dfData
+str(dfData.new)
+## create model matrix
+X = as.matrix(cbind(rep(1, times=nrow(dfData.new)), dfData.new[,colnames(mCoef)[-1]]))
+colnames(X) = colnames(mCoef)
+ivPredict = mypred(colMeans(mCoef), list(mModMatrix=X))
+fPredict = rep('0', times=length(ivPredict))
+fPredict[ivPredict > 0.5] = '1'
+table(fPredict, fGroups)
+
+## fit a binomial model
+fit.bin = glm(fGroups ~ ., data=dfData, family='binomial')
+summary(fit.bin)
+ivPredict.bin = predict(fit.bin, type = 'response')
+
+m = data.frame(round(ivPredict, 2), round(ivPredict.bin, 2), fGroups)
+
+
+
+
+
+# # ## get the intercept at population level
+# iIntercept = mCoef[,1]
+# mCoef = mCoef[,-1]
+# # ## add the intercept to each coefficient, to get the full coefficient
+# # mCoef = sweep(mCoef, 1, iIntercept, '+')
+# 
+# ## function to calculate statistics for a coefficient
+# getDifference = function(ivData){
+#   # get the difference vector
+#   d = ivData
+#   # get the z value
+#   z = mean(d)/sd(d)
+#   # get 2 sided p-value
+#   p = pnorm(-abs(mean(d)/sd(d)))*2
+#   return(p)
+# }
+# 
+# ivPval = apply(mCoef, 2, getDifference)
+# hist(ivPval)
+# plot(colMeans(mCoef), ivPval, pch=19)
+# m = colMeans(mCoef)
+# names(m) = colnames(lData$mModMatrix)[2:length(m)]
+# m = abs(m)
+# m = sort(m, decreasing = T)
 
 
 
