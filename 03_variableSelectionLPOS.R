@@ -652,7 +652,7 @@ initf = function(chain_id = 1) {
 }
 
 
-fit.stan = sampling(stanDso, data=lStanData, iter=2000, chains=2, pars=c('tau', 'betas2'), init=initf, 
+fit.stan = sampling(stanDso, data=lStanData, iter=3000, chains=3, pars=c('tau', 'betas2'), init=initf, 
                     control=list(adapt_delta=0.99, max_treedepth = 11))
 
 print(fit.stan, c('betas2', 'tau'))
@@ -672,9 +672,37 @@ str(dfData.new)
 X = as.matrix(cbind(rep(1, times=nrow(dfData.new)), dfData.new[,colnames(mCoef)[-1]]))
 colnames(X) = colnames(mCoef)
 ivPredict = mypred(colMeans(mCoef), list(mModMatrix=X))
-fPredict = rep('0', times=length(ivPredict))
-fPredict[ivPredict > 0.64556962] = '1'
+xyplot(ivPredict ~ fGroups, xlab='Actual Group', ylab='Predicted Probability of Being Alive (1)')
+## choose an appropriate cutoff for accept and reject regions
+ivTruth = fGroups == '1'
+
+p = prediction(ivPredict, ivTruth)
+perf.alive = performance(p, 'tpr', 'fpr')
+dfPerf.alive = data.frame(c=perf.alive@alpha.values, t=perf.alive@y.values[[1]], f=perf.alive@x.values[[1]], 
+                          r=perf.alive@y.values[[1]]/perf.alive@x.values[[1]])
+colnames(dfPerf.alive) = c('c', 't', 'f', 'r')
+
+ivTruth = !ivTruth
+p = prediction(1-ivPredict, ivTruth)
+perf.death = performance(p, 'tpr', 'fpr')
+dfPerf.death = data.frame(c=perf.death@alpha.values, t=perf.death@y.values[[1]], f=perf.death@x.values[[1]], 
+                          r=perf.death@y.values[[1]]/perf.death@x.values[[1]])
+colnames(dfPerf.death) = c('c', 't', 'f', 'r')
+
+plot(perf.alive)
+plot(perf.death, add=T, col='red')
+legend('bottomright', legend = c('Alive', 'Dead'), col = 1:2, lty=1)
+
+fPredict = rep('reject', times=length(ivPredict))
+fPredict[ivPredict >= 0.9340701166] = '1'
+fPredict[ivPredict <= (1-0.8202671192)] = '0'
 table(fPredict, fGroups)
+
+## draw these accept reject points
+xyplot(ivPredict ~ fGroups, xlab='Actual Group', ylab='Predicted Probability of Being Alive (1)', groups=fPredict,
+       auto.key = list(columns=3))
+
+
 
 ## fit a binomial model
 fit.bin = glm(fGroups ~ ., data=dfData, family='binomial')
