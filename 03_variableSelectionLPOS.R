@@ -467,7 +467,7 @@ ivPval = apply(mCoef, 2, getDifference)
 hist(ivPval)
 plot(colMeans(mCoef), ivPval, pch=19)
 m = colMeans(mCoef)
-names(m) = colnames(lData$mModMatrix)[2:length(m)]
+names(m) = colnames(lData$mModMatrix)[2:ncol(lData$mModMatrix)]
 m = abs(m)
 m = sort(m, decreasing = T)
 #i = which(ivPval < 0.85)
