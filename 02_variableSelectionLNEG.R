@@ -330,7 +330,7 @@ dfData = dfData[,colnames(dfData) %in% cvTopGenes]
 # dfData = dfData[,cn]
 # dim(dfData)
 
-oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
+oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 30)
 # plot the number of variables vs average error rate
 plot.var.selection(oVar.sub)
 
@@ -428,24 +428,24 @@ m = sort(m, decreasing = T)
 # colnames(lData$mModMatrix)[i+1]
 # colMeans(mCoef)[i]
 #cvTopGenes.binomial = colnames(lData$mModMatrix)[i+1]
-cvTopGenes.binomial = names(m[m > 0.25])
+cvTopGenes.binomial = names(m)[1:30] #names(m[m > 0.25])
 
 ## where are these in the random forest table
-which(rownames(dfRF) %in% cvTopGenes.binomial)
-
-cvTopGenes.first = NULL;
-for (i in 1:10){
-  cvTopGenes.first = append(cvTopGenes.first, CVariableSelection.ReduceModel.getMinModel(oVar.sub, i))
-}
-cvTopGenes.first = unique(cvTopGenes.first)
-length(cvTopGenes.first)
+# which(rownames(dfRF) %in% cvTopGenes.binomial)
+# 
+# cvTopGenes.first = NULL;
+# for (i in 1:10){
+#   cvTopGenes.first = append(cvTopGenes.first, CVariableSelection.ReduceModel.getMinModel(oVar.sub, i))
+# }
+# cvTopGenes.first = unique(cvTopGenes.first)
+# length(cvTopGenes.first)
 ################### repeat the selection process again 
 # select the top 30 variables
 #cvTopGenes = rownames(dfRF)[1:30]
-cvTopGenes = unique(c(cvTopGenes.first, cvTopGenes.binomial))
-#cvTopGenes = cvTopGenes.binomial
+#cvTopGenes = unique(c(cvTopGenes.first, cvTopGenes.binomial))
+cvTopGenes = cvTopGenes.binomial
 length(cvTopGenes)
-cvTopGenes = cvTopGenes[1:30]
+#cvTopGenes = cvTopGenes[1:30]
 # use the top 30 features to find top combinations of genes
 dfData = dfData.org
 dfData = dfData[,colnames(dfData) %in% cvTopGenes]
@@ -479,12 +479,12 @@ dim(dfData)
 # dim(dfData)
 oVar.sub.first = oVar.sub
 
-oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
+oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 30)
 # plot the number of variables vs average error rate
 plot.var.selection(oVar.sub)
 
 # print variable combinations
-for (i in 1:6){
+for (i in 1:7){
   cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
   cat('Variable Count', i, paste(cvTopGenes.sub), '\n')
   #print(cvTopGenes.sub)
@@ -493,7 +493,7 @@ for (i in 1:6){
 ## 10 fold nested cross validation with various variable combinations
 par(mfrow=c(2,2))
 # try models of various sizes with CV
-for (i in 1:6){
+for (i in 1:8){
   cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
   dfData.train = data.frame(dfData[-test ,cvTopGenes.sub])
   colnames(dfData.train) = cvTopGenes.sub
@@ -512,7 +512,117 @@ for (i in 1:6){
   print(cvTopGenes.sub)
   print(signif(quantile(x, probs = c(0.025, 0.975)), 2))
 }
+
+### plot these genes of interest
+dfData = dfData[,colnames(dfData) %in% CVariableSelection.ReduceModel.getMinModel(oVar.sub, 5)]
+dim(dfData)
+
+dfData = stack(dfData)
+dfData$fBatch = fGroups
+dfData$fAdjust = fControl
+dfData$Coef = factor(dfData$fBatch:dfData$ind)
+dfData$Coef.adj = factor(dfData$fAdjust:dfData$ind)
+dfData = droplevels.data.frame(dfData)
+str(dfData)
+
+library(lattice)
+densityplot(~ values | ind, groups=fBatch, data=dfData, auto.key = list(columns=2), pch=20, cex=0.5)
+bwplot(values ~ fBatch | ind, data=dfData, type='b', panel=panel.violin, varwidth=F, xlab='Survival Status', ylab='Expression Value')
+xyplot(values ~ fBatch | ind, data=dfData, type='p', varwidth=F)
+
 ##################################
+
+logit.inv = function(p) {exp(p)/(exp(p)+1) }
+
+## binomial prediction
+mypred = function(theta, data){
+  betas = theta # vector of betas i.e. regression coefficients for population
+  ## data
+  mModMatrix = data$mModMatrix
+  # calculate fitted value
+  iFitted = mModMatrix %*% betas
+  # using logit link so use inverse logit
+  iFitted = logit.inv(iFitted)
+  return(iFitted)
+}
+
+dfData = dfData.org
+dfData = dfData[,colnames(dfData) %in% CVariableSelection.ReduceModel.getMinModel(oVar.sub, 5)]
+dim(dfData)
+dim(dfData)
+dfData = data.frame(dfData, fGroups)
+
+lData = list(resp=ifelse(dfData$fGroups == '0', 0, 1), mModMatrix=model.matrix(fGroups ~ 1 + ., data=dfData))
+
+stanDso = rstan::stan_model(file='binomialRegression.stan')
+
+lStanData = list(Ntotal=length(lData$resp), Ncol=ncol(lData$mModMatrix), X=lData$mModMatrix,
+                 y=lData$resp)
+
+## give initial values
+initf = function(chain_id = 1) {
+  list(betas=rep(0, times=ncol(lStanData$X)), tau=0.5)
+}
+
+
+fit.stan = sampling(stanDso, data=lStanData, iter=3000, chains=3, pars=c('tau', 'betas2'), init=initf, 
+                    control=list(adapt_delta=0.99, max_treedepth = 11))
+
+print(fit.stan, c('betas2', 'tau'))
+print(fit.stan, 'tau')
+traceplot(fit.stan, 'tau')
+
+## get the coefficient of interest - Modules in our case from the random coefficients section
+mCoef = extract(fit.stan)$betas2
+dim(mCoef)
+colnames(mCoef) = c('Intercept', CVariableSelection.ReduceModel.getMinModel(oVar.sub, 5))
+pairs(mCoef, pch=20)
+
+## get the predicted values
+dfData.new = dfData
+str(dfData.new)
+## create model matrix
+X = as.matrix(cbind(rep(1, times=nrow(dfData.new)), dfData.new[,colnames(mCoef)[-1]]))
+colnames(X) = colnames(mCoef)
+ivPredict = mypred(colMeans(mCoef), list(mModMatrix=X))
+xyplot(ivPredict ~ fGroups, xlab='Actual Group', ylab='Predicted Probability of Being Alive (1)')
+## choose an appropriate cutoff for accept and reject regions
+ivTruth = fGroups == '1'
+
+p = prediction(ivPredict, ivTruth)
+perf.alive = performance(p, 'tpr', 'fpr')
+dfPerf.alive = data.frame(c=perf.alive@alpha.values, t=perf.alive@y.values[[1]], f=perf.alive@x.values[[1]], 
+                          r=perf.alive@y.values[[1]]/perf.alive@x.values[[1]])
+colnames(dfPerf.alive) = c('c', 't', 'f', 'r')
+
+ivTruth = !ivTruth
+p = prediction(1-ivPredict, ivTruth)
+perf.death = performance(p, 'tpr', 'fpr')
+dfPerf.death = data.frame(c=perf.death@alpha.values, t=perf.death@y.values[[1]], f=perf.death@x.values[[1]], 
+                          r=perf.death@y.values[[1]]/perf.death@x.values[[1]])
+colnames(dfPerf.death) = c('c', 't', 'f', 'r')
+
+plot(perf.alive)
+plot(perf.death, add=T, col='red')
+legend('bottomright', legend = c('Alive', 'Dead'), col = 1:2, lty=1)
+
+fPredict = rep('reject', times=length(ivPredict))
+fPredict[ivPredict >= 0.98922444] = '1'
+fPredict[ivPredict <= (1-0.6168292879)] = '0'
+table(fPredict, fGroups)
+
+## draw these accept reject points
+xyplot(ivPredict ~ fGroups, xlab='Actual Group', ylab='Predicted Probability of Being Alive (1)', groups=fPredict,
+       auto.key = list(columns=3))
+
+
+
+## fit a binomial model
+fit.bin = glm(fGroups ~ ., data=dfData, family='binomial')
+summary(fit.bin)
+ivPredict.bin = predict(fit.bin, type = 'response')
+
+m = data.frame(round(ivPredict, 2), round(ivPredict.bin, 2), fGroups)
 
 
 
