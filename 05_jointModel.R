@@ -210,3 +210,139 @@ table(fPredict, fGroups)
 ## draw these accept reject points
 xyplot(iAggregate ~ fGroups, xlab='Actual Group', ylab='Predicted Probability of Being Alive (1)', groups=fPredict,
        auto.key = list(columns=3))
+
+
+################## fit one binomial model rather than mixture
+##################################
+dfData = dfData.org
+dfData = dfData[,c(cvModel.1, cvModel.2)]
+dim(dfData)
+dfData$fGroups = fGroups
+
+lData = list(resp=ifelse(dfData$fGroups == '0', 0, 1), mModMatrix=model.matrix(fGroups ~ 1 + ., data=dfData))
+
+library(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+stanDso = rstan::stan_model(file='binomialRegression2Scales.stan')
+
+lStanData = list(Ntotal=length(lData$resp), Ncol=ncol(lData$mModMatrix), X=lData$mModMatrix,
+                 y=lData$resp)
+
+head(lData$mModMatrix)
+lStanData$ivCoefMap = c(5, 12)
+
+fit.stan = sampling(stanDso, data=lStanData, iter=2000, chains=2, pars=c('tau', 'betas2', 'betas'), 
+                    control=list(adapt_delta=0.99, max_treedepth = 12))
+
+print(fit.stan, c('betas2', 'tau'))
+print(fit.stan, 'tau')
+traceplot(fit.stan, 'tau')
+
+fit.3 = glm(fGroups ~ ., data=dfData, family = binomial(link='logit'))
+summary(fit.3)
+
+## prediction
+## binomial prediction
+mypred = function(theta, data){
+  betas = theta # vector of betas i.e. regression coefficients for population
+  ## data
+  mModMatrix = data$mModMatrix
+  # calculate fitted value
+  iFitted = mModMatrix %*% betas
+  # using logit link so use inverse logit
+  iFitted = logit.inv(iFitted)
+  return(iFitted)
+}
+
+
+mCoef = extract(fit.stan)$betas2
+dim(mCoef)
+colnames(mCoef) = c('Intercept', c(cvModel.1, cvModel.2))
+pairs(mCoef, pch=20)
+
+## get the predicted values
+dfData.new = dfData
+str(dfData.new)
+## create model matrix
+X = as.matrix(cbind(rep(1, times=nrow(dfData.new)), dfData.new[,colnames(mCoef)[-1]]))
+colnames(X) = colnames(mCoef)
+ivPredict = mypred(colMeans(mCoef), list(mModMatrix=X))
+xyplot(ivPredict ~ fGroups, xlab='Actual Group', ylab='Predicted Probability of Being Alive (1)')
+## choose an appropriate cutoff for accept and reject regions
+ivTruth = fGroups == '1'
+
+p = prediction(ivPredict, ivTruth)
+perf.alive = performance(p, 'tpr', 'fpr')
+dfPerf.alive = data.frame(c=perf.alive@alpha.values, t=perf.alive@y.values[[1]], f=perf.alive@x.values[[1]], 
+                          r=perf.alive@y.values[[1]]/perf.alive@x.values[[1]])
+colnames(dfPerf.alive) = c('c', 't', 'f', 'r')
+
+ivTruth = !ivTruth
+p = prediction(1-ivPredict, ivTruth)
+perf.death = performance(p, 'tpr', 'fpr')
+dfPerf.death = data.frame(c=perf.death@alpha.values, t=perf.death@y.values[[1]], f=perf.death@x.values[[1]], 
+                          r=perf.death@y.values[[1]]/perf.death@x.values[[1]])
+colnames(dfPerf.death) = c('c', 't', 'f', 'r')
+
+par(mfrow=c(1,1))
+plot(perf.alive)
+plot(perf.death, add=T, col='red')
+legend('bottomright', legend = c('Alive', 'Dead'), col = 1:2, lty=1)
+
+fPredict = rep('reject', times=length(ivPredict))
+fPredict[ivPredict >= 0.958387352] = '1'
+fPredict[ivPredict <= (1-7.015914e-01)] = '0'
+table(fPredict, fGroups)
+
+## draw these accept reject points
+xyplot(ivPredict ~ fGroups, xlab='Actual Group', ylab='Predicted Probability of Being Alive (1)', groups=fPredict,
+       auto.key = list(columns=3))
+
+############################ variable selection section
+dfData = dfData.org
+dfData = dfData[,c(cvModel.1, cvModel.2)]
+dim(dfData)
+
+## create a test and training set
+set.seed(1234);
+test = sample(1:nrow(dfData), size = nrow(dfData)*0.2, replace = F)
+table(fGroups[test])
+table(fGroups[-test])
+
+
+oVar.sub = CVariableSelection.ReduceModel(dfData[-test, ], fGroups[-test], boot.num = 100)
+# plot the number of variables vs average error rate
+plot.var.selection(oVar.sub)
+
+# print variable combinations
+for (i in 1:8){
+  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+  cat('Variable Count', i, paste(cvTopGenes.sub), '\n')
+  #print(cvTopGenes.sub)
+}
+
+## 10 fold nested cross validation with various variable combinations
+par(mfrow=c(2,2))
+# try models of various sizes with CV
+for (i in 1:11){
+  cvTopGenes.sub = CVariableSelection.ReduceModel.getMinModel(oVar.sub, i)
+  dfData.train = data.frame(dfData[-test ,cvTopGenes.sub])
+  colnames(dfData.train) = cvTopGenes.sub
+  
+  dfData.test = data.frame(dfData[test ,cvTopGenes.sub])
+  colnames(dfData.test) = cvTopGenes.sub
+  
+  oCV = CCrossValidation.LDA(test.dat = dfData.test, train.dat = dfData.train, test.groups = fGroups[test],
+                             train.groups = fGroups[-test], level.predict = '0', boot.num = 500)
+  
+  plot.cv.performance(oCV)
+  # print variable names and 95% confidence interval for AUC
+  temp = oCV@oAuc.cv
+  x = as.numeric(temp@y.values)
+  print(paste('Variable Count', i))
+  print(cvTopGenes.sub)
+  print(signif(quantile(x, probs = c(0.025, 0.975)), 2))
+}
+
+dev.off(dev.cur())
