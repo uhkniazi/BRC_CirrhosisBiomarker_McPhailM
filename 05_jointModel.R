@@ -147,7 +147,7 @@ m2 = as.matrix(m2[,-1])
 lStanData = list(Ntotal=nrow(dfData.1), Ncol1=ncol(m1), Ncol2=ncol(m2),
                  X1=m1, X2=m2, iMixtures=2, y=ifelse(fGroups == '0', 0, 1))
 
-fit.stan = sampling(stanDso, data=lStanData, iter=1000, chains=1, cores=1)
+fit.stan = sampling(stanDso, data=lStanData, iter=50000, chains=1, cores=1)
 print(fit.stan, c('betasMix1_2', 'betasMix2_2', 'mu', 'iMixWeights', 'tau'), digi=3)
 traceplot(fit.stan, c('betasMix1', 'betasMix2', 'mu', 'iMixWeights'))
 
@@ -203,8 +203,8 @@ plot(perf.death, add=T, col='red')
 legend('bottomright', legend = c('Alive', 'Dead'), col = 1:2, lty=1)
 
 fPredict = rep('reject', times=length(iAggregate))
-fPredict[iAggregate >= 8.093052e-01] = '1'
-fPredict[iAggregate <= (1-3.490180e-01)] = '0'
+fPredict[iAggregate >= 8.329126e-01] = '1'
+fPredict[iAggregate <= (1-0.2570353157)] = '0'
 table(fPredict, fGroups)
 
 ## draw these accept reject points
