@@ -15,7 +15,7 @@ source('CCrossValidation.R')
 # delete the file after source
 unlink('CCrossValidation.R')
 
-dfData = read.csv('~/Dropbox/Home/temp/transposed_cleaned_lpos.csv', header = T, na.strings = c('na', 'NA', 'NaN'))
+dfData = read.csv('temp/transposed_cleaned_lpos.csv', header = T, na.strings = c('na', 'NA', 'NaN'))
 gc(reset = T)
 ## main grouping factor
 fGroups = factor(dfData$X90_day)
@@ -64,7 +64,7 @@ fGroups.bk = fGroups
 fControl.bk = fControl
 
 ############### load the mass spec data lpos
-dfData = read.csv('~/Dropbox/Home/temp/transposed_cleaned_lpos.csv', header = T, na.strings = c('na', 'NA', 'NaN'))
+dfData = read.csv('temp/transposed_cleaned_lpos.csv', header = T, na.strings = c('na', 'NA', 'NaN'))
 
 ## match the 2 data sets
 i = match(dfData.bk$sample_ID_V2, dfData$sample_ID_V2)
@@ -147,7 +147,8 @@ m2 = as.matrix(m2[,-1])
 lStanData = list(Ntotal=nrow(dfData.1), Ncol1=ncol(m1), Ncol2=ncol(m2),
                  X1=m1, X2=m2, iMixtures=2, y=ifelse(fGroups == '0', 0, 1))
 
-fit.stan = sampling(stanDso, data=lStanData, iter=50000, chains=1, cores=1)
+fit.stan = sampling(stanDso, data=lStanData, iter=20000, chains=1, cores=1)
+save(fit.stan, file='temp/fit.stan_bin2ComponentMix_19Mar.rds')
 print(fit.stan, c('betasMix1_2', 'betasMix2_2', 'mu', 'iMixWeights', 'tau'), digi=3)
 traceplot(fit.stan, c('betasMix1', 'betasMix2', 'mu', 'iMixWeights'))
 
